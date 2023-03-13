@@ -229,8 +229,10 @@ static int dfuse_special_command(struct dfu_if *dif, unsigned int address,
 
 	ret = dfuse_download(dif, length, buf, 0);
 	if (ret < 0) {
-		errx(EX_IOERR, "Error during special command \"%s\" download",
-			dfuse_command_name[command]);
+		errx(EX_IOERR,
+		     "Error during special command \"%s\" download: %d (%s)",
+		     dfuse_command_name[command],
+		     ret, libusb_error_name(ret));
 	}
 	do {
 		ret = dfu_get_status(dif, &dst);
@@ -242,8 +244,10 @@ static int dfuse_special_command(struct dfu_if *dif, unsigned int address,
 			if (verbose)
 				fprintf(stderr, "* Device stalled USB pipe, reusing last poll timeout\n");
 		} else if (ret < 0) {
-			errx(EX_IOERR, "Error during special command \"%s\" get_status",
-			     dfuse_command_name[command]);
+			errx(EX_IOERR,
+			     "Error during special command \"%s\" get_status: %d (%s)",
+			     dfuse_command_name[command],
+			     ret, libusb_error_name(ret));
 		} else {
 			polltimeout = dst.bwPollTimeout;
 		}
@@ -294,7 +298,8 @@ static int dfuse_dnload_chunk(struct dfu_if *dif, unsigned char *data, int size,
 
 	ret = dfuse_download(dif, size, size ? data : NULL, transaction);
 	if (ret < 0) {
-		errx(EX_IOERR, "Error during download");
+		errx(EX_IOERR, "Error during download: %d (%s)",
+		     ret, libusb_error_name(ret));
 		return ret;
 	}
 	bytes_sent = ret;
@@ -302,7 +307,9 @@ static int dfuse_dnload_chunk(struct dfu_if *dif, unsigned char *data, int size,
 	do {
 		ret = dfu_get_status(dif, &dst);
 		if (ret < 0) {
-			errx(EX_IOERR, "Error during download get_status");
+			errx(EX_IOERR,
+			     "Error during download get_status: %d (%s)",
+			     ret, libusb_error_name(ret));
 			return ret;
 		}
 		milli_sleep(dst.bwPollTimeout);
