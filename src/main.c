@@ -781,6 +781,8 @@ status_again:
 		if (ret < 0 && ret != LIBUSB_ERROR_NOT_FOUND) {
 			warnx("error resetting after download: %s", libusb_error_name(ret));
 			ret = EX_IOERR;
+		} else {
+			ret = EX_OK;
 		}
 	}
 
