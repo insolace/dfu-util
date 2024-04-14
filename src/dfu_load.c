@@ -206,6 +206,8 @@ get_status:
 		if (ret < 0 && ret != LIBUSB_ERROR_NOT_FOUND) {
 			fprintf(stderr, "error resetting after download (%s)\n",
 				libusb_error_name(ret));
+		} else {
+			ret = 0;
 		}
 		break;
 	case DFU_STATE_dfuIDLE:
