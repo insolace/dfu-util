@@ -268,7 +268,9 @@ static int dfuse_special_command(struct dfu_if *dif, unsigned int address,
 		}
 		/* wait while command is executed */
 		if (verbose > 1)
-			fprintf(stderr, "   Poll timeout %i ms\n", polltimeout);
+			fprintf(stderr, "   Poll timeout %i ms on command %s (state=%s)\n",
+				polltimeout, dfuse_command_name[command],
+				dfu_state_to_string(dst.bState));
 		milli_sleep(polltimeout);
 		if (command == READ_UNPROTECT)
 			return ret;
@@ -312,6 +314,9 @@ static int dfuse_dnload_chunk(struct dfu_if *dif, unsigned char *data, int size,
 			     ret, libusb_error_name(ret));
 			return ret;
 		}
+		if (verbose > 1)
+			fprintf(stderr, "   Poll timeout %i ms on download (state=%s)\n",
+				dst.bwPollTimeout, dfu_state_to_string(dst.bState));
 		milli_sleep(dst.bwPollTimeout);
 	} while (dst.bState != DFU_STATE_dfuDNLOAD_IDLE &&
 		 dst.bState != DFU_STATE_dfuERROR &&
