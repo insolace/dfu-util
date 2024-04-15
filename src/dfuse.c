@@ -243,7 +243,9 @@ static int dfuse_special_command(struct dfu_if *dif, unsigned int address,
 	do {
 		ret = dfu_get_status(dif, &dst);
 		/* Workaround for some STM32L4 bootloaders that report a too
-		 * short poll timeout and may stall the pipe when we poll */
+		 * short poll timeout and may stall the pipe when we poll.
+		 * This also allows "fast" mode (without poll timeouts) to work
+		 * with many bootloaders. */
 		if (ret == LIBUSB_ERROR_PIPE && polltimeout != 0 && stalls < 3) {
 			dst.bState = DFU_STATE_dfuDNBUSY;
 			stalls++;
@@ -307,6 +309,7 @@ static int dfuse_dnload_chunk(struct dfu_if *dif, unsigned char *data, int size,
 	int bytes_sent;
 	struct dfu_status dst;
 	int ret;
+	int stalls = 0;
 
 	ret = dfuse_download(dif, size, size ? data : NULL, transaction);
 	if (ret < 0) {
@@ -318,6 +321,14 @@ static int dfuse_dnload_chunk(struct dfu_if *dif, unsigned char *data, int size,
 
 	do {
 		ret = dfu_get_status(dif, &dst);
+		/* needed for some STM32L4 bootloaders and for "fast" mode */
+		if (ret == LIBUSB_ERROR_PIPE && stalls < 3) {
+			dst.bState = DFU_STATE_dfuDNBUSY;
+			stalls++;
+			if (verbose)
+				fprintf(stderr, " * Pipe error, retrying get_status\n");
+			continue;
+		}
 		if (ret < 0) {
 			errx(EX_IOERR,
 			     "Error during download get_status: %d (%s)",
