@@ -261,7 +261,7 @@ static int dfuse_special_command(struct dfu_if *dif, unsigned int address,
 		}
 		if (firstpoll) {
 			firstpoll = 0;
-			if (dst.bState != DFU_STATE_dfuDNBUSY) {
+			if (dst.bState != DFU_STATE_dfuDNBUSY && dst.bState != DFU_STATE_dfuDNLOAD_IDLE) {
 				fprintf(stderr, "DFU state(%u) = %s, status(%u) = %s\n", dst.bState,
 				       dfu_state_to_string(dst.bState), dst.bStatus,
 				       dfu_status_to_string(dst.bStatus));
