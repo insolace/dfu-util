@@ -51,6 +51,7 @@ static int dfuse_leave = 0;
 static int dfuse_unprotect = 0;
 static int dfuse_mass_erase = 0;
 static int dfuse_will_reset = 0;
+static int dfuse_fast = 0;
 
 static unsigned int quad2uint(unsigned char *p)
 {
@@ -111,6 +112,11 @@ static void dfuse_parse_options(const char *options)
 		if (!strncmp(options, "will-reset", endword - options)) {
 			dfuse_will_reset = 1;
 			options += 10;
+			continue;
+		}
+		if (!strncmp(options, "fast", endword - options)) {
+			dfuse_fast = 1;
+			options += 4;
 			continue;
 		}
 
@@ -274,7 +280,7 @@ static int dfuse_special_command(struct dfu_if *dif, unsigned int address,
 		/* A non-null bwPollTimeout for SET_ADDRESS seems a common bootloader bug */
 		if (command == SET_ADDRESS)
 			polltimeout = 0;
-		if (dst.bState == DFU_STATE_dfuDNBUSY)
+		if (!dfuse_fast && dst.bState == DFU_STATE_dfuDNBUSY)
 			milli_sleep(polltimeout);
 		if (command == READ_UNPROTECT)
 			return ret;
@@ -321,7 +327,7 @@ static int dfuse_dnload_chunk(struct dfu_if *dif, unsigned char *data, int size,
 		if (verbose > 1)
 			fprintf(stderr, "   Poll timeout %i ms on download (state=%s)\n",
 				dst.bwPollTimeout, dfu_state_to_string(dst.bState));
-		if (dst.bState == DFU_STATE_dfuDNBUSY)
+		if (!dfuse_fast && dst.bState == DFU_STATE_dfuDNBUSY)
 			milli_sleep(dst.bwPollTimeout);
 	} while (dst.bState != DFU_STATE_dfuDNLOAD_IDLE &&
 		 dst.bState != DFU_STATE_dfuERROR &&

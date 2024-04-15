@@ -197,6 +197,7 @@ static void help(void)
 		"\t\tunprotect\tErase read protected device (requires \"force\")\n"
 		"\t\twill-reset\tExpect device to reset (e.g. option bytes write)\n"
 		"\t\tforce\t\tYou really know what you are doing!\n"
+		"\t\tfast\t\tSpeed up by ignoring poll timeout (experimental)\n"
 		"\t\t<length>\tLength of firmware to upload from device\n"
 		);
 }
