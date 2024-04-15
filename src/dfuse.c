@@ -271,6 +271,9 @@ static int dfuse_special_command(struct dfu_if *dif, unsigned int address,
 			fprintf(stderr, "   Poll timeout %i ms on command %s (state=%s)\n",
 				polltimeout, dfuse_command_name[command],
 				dfu_state_to_string(dst.bState));
+		/* A non-null bwPollTimeout for SET_ADDRESS seems a common bootloader bug */
+		if (command == SET_ADDRESS)
+			polltimeout = 0;
 		if (dst.bState == DFU_STATE_dfuDNBUSY)
 			milli_sleep(polltimeout);
 		if (command == READ_UNPROTECT)
