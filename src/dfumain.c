@@ -45,6 +45,8 @@
 #include "dfu_util.h"
 #include "dfuse.h"
 
+#include "dfumain.h"
+
 int verbose = 0;
 
 struct dfu_if *dfu_root = NULL;
@@ -169,7 +171,8 @@ static void help(void)
 		"  -h --help\t\t\tPrint this help message\n"
 		"  -V --version\t\t\tPrint the version number\n"
 		"  -v --verbose\t\t\tPrint verbose debug statements\n"
-		"  -l --list\t\t\tList currently attached DFU capable devices\n");
+        "  -l --list\t\t\tList currently attached DFU capable devices\n"
+        "  -L --leave\t\t\tLeave DFU mode without flashing and run program at address\n");
 	fprintf(stderr, "  -e --detach\t\t\tDetach currently attached DFU capable devices\n"
 		"  -E --detach-delay seconds\tTime to wait before reopening a device after detach\n"
 		"  -d --device <vendor>:<product>[,<vendor_dfu>:<product_dfu>]\n"
@@ -215,6 +218,7 @@ static const struct option opts[] = {
 	{ "help", 0, 0, 'h' },
 	{ "version", 0, 0, 'V' },
 	{ "verbose", 0, 0, 'v' },
+    { "leave", 0, 0, 'L' },
 	{ "list", 0, 0, 'l' },
 	{ "detach", 0, 0, 'e' },
 	{ "detach-delay", 1, 0, 'E' },
@@ -238,7 +242,7 @@ static const struct option opts[] = {
 	{ 0, 0, 0, 0 }
 };
 
-int main(int argc, char **argv)
+int dfumain(int argc, char **argv)
 {
 	int expected_size = 0;
 	unsigned int transfer_size = 0;
@@ -259,12 +263,22 @@ int main(int argc, char **argv)
 
 	memset(&file, 0, sizeof(file));
 
+    char cwd[PATH_MAX];
+
+    // Get the current working directory
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        printf("Current working directory: %s\n", cwd);
+    } else {
+        perror("getcwd() error");
+        return 1;
+    }
+
 	/* make sure all prints are flushed */
 	setvbuf(stdout, NULL, _IONBF, 0);
 
 	while (1) {
 		int c, option_index = 0;
-		c = getopt_long(argc, argv, "hVvleE:d:p:c:i:a:S:t:U:D:Rs:Z:wn:", opts,
+        c = getopt_long(argc, argv, "hVvLleE:d:p:c:i:a:S:t:U:D:Rs:Z:wn:", opts,
 				&option_index);
 		if (c == -1)
 			break;
@@ -272,7 +286,7 @@ int main(int argc, char **argv)
 		switch (c) {
 		case 'h':
 			help();
-			exit(EX_OK);
+            return 0;
 			break;
 		case 'V':
 			mode = MODE_VERSION;
@@ -280,6 +294,9 @@ int main(int argc, char **argv)
 		case 'v':
 			verbose++;
 			break;
+        case 'L':
+            mode = MODE_LEAVE;
+            break;
 		case 'l':
 			mode = MODE_LIST;
 			break;
@@ -346,19 +363,19 @@ int main(int argc, char **argv)
 			break;
 		default:
 			help();
-			exit(EX_USAGE);
+            return EX_USAGE;
 			break;
 		}
 	}
 	if (optind != argc) {
 		fprintf(stderr, "Error: Unexpected argument: %s\n\n", argv[optind]);
 		help();
-		exit(EX_USAGE);
+        return EX_USAGE;
 	}
 
 	print_version();
 	if (mode == MODE_VERSION) {
-		exit(EX_OK);
+        return 0;
 	}
 
 #if defined(LIBUSB_API_VERSION) || defined(LIBUSBX_API_VERSION)
@@ -375,7 +392,7 @@ int main(int argc, char **argv)
 	if (mode == MODE_NONE && !dfuse_options) {
 		fprintf(stderr, "You need to specify one of -D or -U\n");
 		help();
-		exit(EX_USAGE);
+        return EX_USAGE;
 	}
 
 	if (match_config_index == 0) {
@@ -714,6 +731,15 @@ status_again:
 	}
 
 	switch (mode) {
+    case MODE_LEAVE:
+        if (dfuse_device || dfuse_options || file.bcdDFU == 0x11a) {
+            if (dfuse_do_leave(dfu_root) < 0)
+                return 1;
+        } else {
+            errx(EX_IOERR, "Non-dfuse leave unsupported");
+            return 1;
+        }
+        break;
 	case MODE_UPLOAD:
 		/* open for "exclusive" writing */
 		fd = open(file.name, O_WRONLY | O_BINARY | O_CREAT | O_EXCL | O_TRUNC, 0666);

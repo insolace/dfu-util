@@ -358,20 +358,28 @@ static int dfuse_dnload_chunk(struct dfu_if *dif, unsigned char *data, int size,
 	return bytes_sent;
 }
 
-static void dfuse_do_leave(struct dfu_if *dif)
+int dfuse_do_leave(struct dfu_if *dif)
 {
+    if (dif == NULL){
+        return 0;
+    }
+
 	if (dfuse_address_present)
 		dfuse_special_command(dif, dfuse_address, SET_ADDRESS);
+
 	printf("Submitting leave request...\n");
-	if (dif->quirks & QUIRK_DFUSE_LEAVE) {
-		struct dfu_status dst;
-		/* The device might leave after this request, with or without a response */
-		dfuse_download(dif, 0, NULL, 2);
-		/* Or it might leave after this request, with or without a response */
-		dfu_get_status(dif, &dst);
+    if (dif->quirks != 0) {
+        if (dif->quirks & QUIRK_DFUSE_LEAVE) {
+            struct dfu_status dst;
+            /* The device might leave after this request, with or without a response */
+            dfuse_download(dif, 0, NULL, 2);
+            /* Or it might leave after this request, with or without a response */
+            dfu_get_status(dif, &dst);
+        }
 	} else {
 		dfuse_dnload_chunk(dif, NULL, 0, 2);
 	}
+    return -1; // success
 }
 
 int dfuse_do_upload(struct dfu_if *dif, int xfer_size, int fd,

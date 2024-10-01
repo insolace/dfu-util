@@ -7,11 +7,18 @@
 # define PACKAGE_VERSION "0.11-msvc"
 # define PACKAGE_STRING "dfu-util 0.11-msvc"
 # define PACKAGE_BUGREPORT "http://sourceforge.net/p/dfu-util/tickets/"
-# include <io.h>
-/* FIXME if off_t is a typedef it is not a define */
-# ifndef off_t
-#  define off_t long int
+
+# ifdef _WIN32
+#  include <io.h>  // Windows-specific
+#  ifndef off_t
+#   define off_t long int
+#  endif
+# else
+#  include <unistd.h>  // For macOS and Linux
+#  include <sys/types.h>
+#  define HAVE_NANOSLEEP
 # endif
+
 #endif /* HAVE_CONFIG_H */
 
 #ifdef HAVE_UNISTD_H
