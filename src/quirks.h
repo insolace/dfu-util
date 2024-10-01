@@ -11,6 +11,7 @@
 #define VENDOR_SIEMENS          0x0908 /* Siemens AG */
 #define VENDOR_MIDIMAN          0x0763 /* Midiman */
 #define VENDOR_GIGADEVICE       0x28e9 /* GigaDevice */
+#define VENDOR_STM              0x0483 /* STM32 */
 
 #define PRODUCT_FREERUNNER_FIRST 0x5117
 #define PRODUCT_FREERUNNER_LAST  0x5126
@@ -22,6 +23,7 @@
 #define PRODUCT_PXM50           0x02c5 /* Siemens AG, PXM 50 */
 #define PRODUCT_TRANSIT         0x2806 /* M-Audio Transit (Midiman) */
 #define PRODUCT_GD32            0x0189 /* GigaDevice GD32VF103 rev 1 */
+#define PRODUCT_STMG32G0        0xdf11 /* STM32G0 Bootloader */
 
 #define QUIRK_POLLTIMEOUT  (1<<0)
 #define QUIRK_FORCE_DFU11  (1<<1)

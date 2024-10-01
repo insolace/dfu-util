@@ -72,6 +72,11 @@ uint16_t get_quirks(uint16_t vendor, uint16_t product, uint16_t bcdDevice)
 		quirks |= QUIRK_DFUSE_LEAVE;
 	}
 
+//    if (vendor == VENDOR_STM &&
+//        product == PRODUCT_STMG32G0) {
+//        quirks |= QUIRK_DFUSE_LEAVE;
+//    }
+
 	return (quirks);
 }
 
