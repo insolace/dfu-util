@@ -330,8 +330,7 @@ static int dfuse_dnload_chunk(struct dfu_if *dif, unsigned char *data, int size,
 			continue;
 		}
 		if (ret < 0) {
-			errx(EX_IOERR,
-			     "Error during download get_status: %d (%s)",
+            warnx("Error during download get_status: %d (%s)",
 			     ret, libusb_error_name(ret));
 			return ret;
 		}
@@ -358,28 +357,76 @@ static int dfuse_dnload_chunk(struct dfu_if *dif, unsigned char *data, int size,
 	return bytes_sent;
 }
 
-int dfuse_do_leave(struct dfu_if *dif)
+
+const char* dfu_state_to_human_readable(int state) {
+    switch (state) {
+        case DFU_STATE_appIDLE:
+            return "App Idle";
+        case DFU_STATE_appDETACH:
+            return "App Detach";
+        case DFU_STATE_dfuIDLE:
+            return "DFU Idle";
+        case DFU_STATE_dfuDNLOAD_SYNC:
+            return "Download Sync";
+        case DFU_STATE_dfuDNLOAD_IDLE:
+            return "Download Idle";
+        case DFU_STATE_dfuMANIFEST_SYNC:
+            return "Manifest Sync";
+        case DFU_STATE_dfuMANIFEST:
+            return "Manifest";
+        case DFU_STATE_dfuMANIFEST_WAIT_RST:
+            return "Manifest Wait Reset";
+        case DFU_STATE_dfuUPLOAD_IDLE:
+            return "Upload Idle";
+        case DFU_STATE_dfuERROR:
+            return "DFU Error";
+        default:
+            return "Unknown State";
+    }
+}
+
+int dfuse_do_leave(struct dfu_if *dif, const char *dfuse_options)
 {
     if (dif == NULL){
         return 0;
     }
 
-	if (dfuse_address_present)
+    if (dfuse_options){
+        dfuse_parse_options(dfuse_options);
+    }
+
+    if (dfuse_address_present){
 		dfuse_special_command(dif, dfuse_address, SET_ADDRESS);
+    }
 
 	printf("Submitting leave request...\n");
-    if (dif->quirks != 0) {
-        if (dif->quirks & QUIRK_DFUSE_LEAVE) {
-            struct dfu_status dst;
-            /* The device might leave after this request, with or without a response */
-            dfuse_download(dif, 0, NULL, 2);
-            /* Or it might leave after this request, with or without a response */
-            dfu_get_status(dif, &dst);
+    struct dfu_status status;
+
+    if (dif->quirks != 0 && (dif->quirks & QUIRK_DFUSE_LEAVE)) {
+        /* The device might leave after this request, with or without a response */
+        dfuse_download(dif, 0, NULL, 2);
+        /* Check the status to confirm it entered MANIFEST state */
+        dfu_get_status(dif, &status);
+        if (status.bState != DFU_STATE_dfuMANIFEST) {
+            printf("Error: DFU state is %s (expected Manifest)\n", dfu_state_to_human_readable(status.bState));
+            return -1;
         }
-	} else {
-		dfuse_dnload_chunk(dif, NULL, 0, 2);
-	}
-    return -1; // success
+    } else {
+        /* Standard case for STM32: send zero-length download */
+        dfu_get_status(dif, &status);
+        if (status.bState == DFU_STATE_dfuERROR) {
+            dfu_clear_status(dif->dev_handle, dif->interface);
+        }
+
+        dfuse_dnload_chunk(dif, NULL, 0, 2);
+        /* Check the status to confirm it entered MANIFEST state */
+        dfu_get_status(dif, &status);
+        if (status.bState != DFU_STATE_dfuMANIFEST) {
+            printf("Error: DFU state is %s (expected Manifest)\n", dfu_state_to_human_readable(status.bState));
+            return -1;
+        }
+    }
+    return 0; // success
 }
 
 int dfuse_do_upload(struct dfu_if *dif, int xfer_size, int fd,
@@ -468,7 +515,7 @@ int dfuse_do_upload(struct dfu_if *dif, int xfer_size, int fd,
 
 	dfu_abort_to_idle(dif);
 	if (dfuse_leave)
-		dfuse_do_leave(dif);
+        dfuse_do_leave(dif, dfuse_options);
 
  out_free:
 	free(buf);
@@ -815,7 +862,7 @@ int dfuse_do_dnload(struct dfu_if *dif, int xfer_size, struct dfu_file *file,
 	}
 
 	if (dfuse_leave)
-		dfuse_do_leave(dif);
+        dfuse_do_leave(dif, dfuse_options);
 
 	return ret;
 }

@@ -733,7 +733,7 @@ status_again:
 	switch (mode) {
     case MODE_LEAVE:
         if (dfuse_device || dfuse_options || file.bcdDFU == 0x11a) {
-            if (dfuse_do_leave(dfu_root) < 0)
+            if (dfuse_do_leave(dfu_root, dfuse_options) < 0)
                 return 1;
         } else {
             errx(EX_IOERR, "Non-dfuse leave unsupported");

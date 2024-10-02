@@ -343,16 +343,16 @@ int dfu_abort_to_idle(struct dfu_if *dif)
 
 	ret = dfu_abort(dif->dev_handle, dif->interface);
 	if (ret < 0) {
-		errx(EX_IOERR, "Error sending dfu abort request");
+        warnx("Error sending dfu abort request");
 		exit(1);
 	}
 	ret = dfu_get_status(dif, &dst);
 	if (ret < 0) {
-		errx(EX_IOERR, "Error during abort get_status");
+        warnx("Error during abort get_status");
 		exit(1);
 	}
 	if (dst.bState != DFU_STATE_dfuIDLE) {
-		errx(EX_IOERR, "Failed to enter idle state on abort");
+        warnx("Failed to enter idle state on abort");
 		exit(1);
 	}
 	milli_sleep(dst.bwPollTimeout);
