@@ -482,10 +482,15 @@ void print_dfu_if(struct dfu_if *dfu_if)
 }
 
 /* Walk the device tree and print out DFU devices */
-void list_dfu_interfaces(void)
+int list_dfu_interfaces(void)
 {
+    int numInterfaces = 0;
 	struct dfu_if *pdfu;
 
 	for (pdfu = dfu_root; pdfu != NULL; pdfu = pdfu->next)
+    {
+        numInterfaces++;
 		print_dfu_if(pdfu);
+    }
+    return numInterfaces;
 }

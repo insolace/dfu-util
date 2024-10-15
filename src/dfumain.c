@@ -242,139 +242,150 @@ static const struct option opts[] = {
 	{ 0, 0, 0, 0 }
 };
 
-int dfumain(int argc, char **argv)
-{
-	int expected_size = 0;
-	unsigned int transfer_size = 0;
-	enum mode mode = MODE_NONE;
-	struct dfu_status status;
-	libusb_context *ctx;
-	struct dfu_file file;
-	char *end;
-	int final_reset = 0;
-	int wait_device = 0;
-	int ret;
-	int dfuse_device = 0;
-	int fd;
-	const char *dfuse_options = NULL;
-	int detach_delay = 5;
-	uint16_t runtime_vendor;
-	uint16_t runtime_product;
+int dfumain(int argc, char **argv) {
+    return dfumain_with_file(argc, argv, NULL);
+}
 
-	memset(&file, 0, sizeof(file));
+int dfumain_with_file(int argc, char **argv, const char *filename) {
+    int expected_size = 0;
+    unsigned int transfer_size = 0;
+    enum mode mode = MODE_NONE;
+    struct dfu_status status;
+    libusb_context *ctx;
+    struct dfu_file file;
+    char *end;
+    int final_reset = 0;
+    int wait_device = 0;
+    int ret;
+    int dfuse_device = 0;
+    int fd;
+    const char *dfuse_options = NULL;
+    int detach_delay = 5;
+    uint16_t runtime_vendor;
+    uint16_t runtime_product;
 
-    char cwd[PATH_MAX];
+    memset(&file, 0, sizeof(file));
+
+    //char cwd[PATH_MAX];
 
     // Get the current working directory
-    if (getcwd(cwd, sizeof(cwd)) != NULL) {
-        printf("Current working directory: %s\n", cwd);
-    } else {
-        perror("getcwd() error");
-        return 1;
+//    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+//        printf("Current working directory: %s\n", cwd);
+//    } else {
+//        perror("getcwd() error");
+//        return 1;
+//    }
+
+    // Set file name for download mode if filename is provided
+    if (filename != NULL) {
+        mode = MODE_DOWNLOAD;
+        file.name = filename;
+        printf("File: %s\n", filename);
     }
 
-	/* make sure all prints are flushed */
-	setvbuf(stdout, NULL, _IONBF, 0);
+    // make sure all prints are flushed
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-	while (1) {
-		int c, option_index = 0;
-        c = getopt_long(argc, argv, "hVvLleE:d:p:c:i:a:S:t:U:D:Rs:Z:wn:", opts,
-				&option_index);
-		if (c == -1)
-			break;
+    // Reset optind to 1 before parsing arguments
+    optind = 1;
 
-		switch (c) {
-		case 'h':
-			help();
+    while (1) {
+        int c, option_index = 0;
+        c = getopt_long(argc, argv, "hVvLleE:d:p:c:i:a:S:t:U:D:Rs:Z:wn:", opts, &option_index);
+        if (c == -1)
+            break;
+
+        switch (c) {
+        case 'h':
+            help();
             return 0;
-			break;
-		case 'V':
-			mode = MODE_VERSION;
-			break;
-		case 'v':
-			verbose++;
-			break;
+        case 'V':
+            mode = MODE_VERSION;
+            break;
+        case 'v':
+            verbose++;
+            break;
         case 'L':
             mode = MODE_LEAVE;
             break;
-		case 'l':
-			mode = MODE_LIST;
-			break;
-		case 'e':
-			mode = MODE_DETACH;
-			break;
-		case 'E':
-			detach_delay = parse_number("detach-delay", optarg);
-			break;
-		case 'd':
-			parse_vendprod(optarg);
-			break;
-		case 'p':
+        case 'l':
+            mode = MODE_LIST;
+            break;
+        case 'e':
+            mode = MODE_DETACH;
+            break;
+        case 'E':
+            detach_delay = parse_number("detach-delay", optarg);
+            break;
+        case 'd':
+            parse_vendprod(optarg);
+            break;
+        case 'p':
 #if (defined(LIBUSB_API_VERSION) && LIBUSB_API_VERSION >= 0x01000102) || (defined(LIBUSBX_API_VERSION) && LIBUSBX_API_VERSION >= 0x01000102)
-			match_path = optarg;
+            match_path = optarg;
 #else
-			errx(EX_SOFTWARE, "This dfu-util was built without USB path support");
+            errx(EX_SOFTWARE, "This dfu-util was built without USB path support");
 #endif
-			break;
-		case 'c':
-			/* Configuration */
-			match_config_index = parse_number("cfg", optarg);
-			break;
-		case 'i':
-			/* Interface */
-			match_iface_index = parse_number("intf", optarg);
-			break;
-		case 'a':
-			/* Interface Alternate Setting */
-			match_iface_alt_index = strtoul(optarg, &end, 0);
-			if (*end) {
-				match_iface_alt_name = optarg;
-				match_iface_alt_index = -1;
-			}
-			break;
-		case 'n':
-			match_devnum = atoi(optarg);
-			break;
-		case 'S':
-			parse_serial(optarg);
-			break;
-		case 't':
-			transfer_size = parse_number("transfer-size", optarg);
-			break;
-		case 'U':
-			mode = MODE_UPLOAD;
-			file.name = optarg;
-			break;
-		case 'Z':
-			expected_size = parse_number("upload-size", optarg);
-			break;
-		case 'D':
-			mode = MODE_DOWNLOAD;
-			file.name = optarg;
-			break;
-		case 'R':
-			final_reset = 1;
-			break;
-		case 's':
-			dfuse_options = optarg;
-			break;
-		case 'w':
-			wait_device = 1;
-			break;
-		default:
-			help();
+            break;
+        case 'c':
+            match_config_index = parse_number("cfg", optarg);
+            break;
+        case 'i':
+            match_iface_index = parse_number("intf", optarg);
+            break;
+        case 'a':
+            match_iface_alt_index = strtoul(optarg, &end, 0);
+            if (*end) {
+                match_iface_alt_name = optarg;
+                match_iface_alt_index = -1;
+            }
+            break;
+        case 'n':
+            match_devnum = atoi(optarg);
+            break;
+        case 'S':
+            parse_serial(optarg);
+            break;
+        case 't':
+            transfer_size = parse_number("transfer-size", optarg);
+            break;
+        case 'U':
+            mode = MODE_UPLOAD;
+            file.name = optarg;
+            break;
+        case 'Z':
+            expected_size = parse_number("upload-size", optarg);
+            break;
+        case 'D':
+            mode = MODE_DOWNLOAD;
+            if (filename == NULL) {  // only set optarg if filename wasn't passed
+                file.name = optarg;
+            }
+            break;
+        case 'R':
+            final_reset = 1;
+            break;
+        case 's':
+            dfuse_options = optarg;
+            break;
+        case 'w':
+            wait_device = 1;
+            break;
+        default:
+            help();
             return EX_USAGE;
-			break;
-		}
-	}
-	if (optind != argc) {
-		fprintf(stderr, "Error: Unexpected argument: %s\n\n", argv[optind]);
-		help();
-        return EX_USAGE;
-	}
+        }
+    }
 
-	print_version();
+    // If mode is download but no file was specified, print an error
+    if (mode == MODE_DOWNLOAD && !file.name) {
+        fprintf(stderr, "Error: No file specified for download mode\n");
+        return EX_USAGE;
+    }
+
+
 	if (mode == MODE_VERSION) {
+        print_version();
         return 0;
 	}
 
@@ -438,10 +449,10 @@ probe:
 	probe_devices(ctx);
 
 	if (mode == MODE_LIST) {
-		list_dfu_interfaces();
+        int numInterfaces = list_dfu_interfaces();
 		disconnect_devices();
 		libusb_exit(ctx);
-		return EX_OK;
+        return numInterfaces;
 	}
 
 	if (dfu_root == NULL) {
