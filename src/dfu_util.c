@@ -29,6 +29,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include<stdbool.h>
 #include <errno.h>
 #include <string.h>
 #include <libusb.h>
@@ -481,6 +482,8 @@ void print_dfu_if(struct dfu_if *dfu_if)
 	       dfu_if->serial_name);
 }
 
+extern bool quiet;
+
 /* Walk the device tree and print out DFU devices */
 int list_dfu_interfaces(void)
 {
@@ -490,7 +493,8 @@ int list_dfu_interfaces(void)
 	for (pdfu = dfu_root; pdfu != NULL; pdfu = pdfu->next)
     {
         numInterfaces++;
-		print_dfu_if(pdfu);
+        if (quiet == false)
+            print_dfu_if(pdfu);
     }
     return numInterfaces;
 }

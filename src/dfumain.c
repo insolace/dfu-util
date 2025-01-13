@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 #include <getopt.h>
 #include <libusb.h>
 #include <errno.h>
@@ -215,32 +216,35 @@ static void print_version(void)
 }
 
 static const struct option opts[] = {
-	{ "help", 0, 0, 'h' },
-	{ "version", 0, 0, 'V' },
-	{ "verbose", 0, 0, 'v' },
+    { "help", 0, 0, 'h' },
+    { "version", 0, 0, 'V' },
+    { "verbose", 0, 0, 'v' },
     { "leave", 0, 0, 'L' },
-	{ "list", 0, 0, 'l' },
-	{ "detach", 0, 0, 'e' },
-	{ "detach-delay", 1, 0, 'E' },
-	{ "device", 1, 0, 'd' },
-	{ "path", 1, 0, 'p' },
-	{ "configuration", 1, 0, 'c' },
-	{ "cfg", 1, 0, 'c' },
-	{ "interface", 1, 0, 'i' },
-	{ "intf", 1, 0, 'i' },
-	{ "altsetting", 1, 0, 'a' },
-	{ "alt", 1, 0, 'a' },
-	{ "serial", 1, 0, 'S' },
-	{ "transfer-size", 1, 0, 't' },
-	{ "upload", 1, 0, 'U' },
-	{ "upload-size", 1, 0, 'Z' },
-	{ "download", 1, 0, 'D' },
-	{ "reset", 0, 0, 'R' },
-	{ "dfuse-address", 1, 0, 's' },
-	{ "devnum",1, 0, 'n' },
-	{ "wait", 1, 0, 'w' },
-	{ 0, 0, 0, 0 }
+    { "list", 0, 0, 'l' },
+    { "detach", 0, 0, 'e' },
+    { "detach-delay", 1, 0, 'E' },
+    { "device", 1, 0, 'd' },
+    { "path", 1, 0, 'p' },
+    { "configuration", 1, 0, 'c' },
+    { "cfg", 1, 0, 'c' },
+    { "interface", 1, 0, 'i' },
+    { "intf", 1, 0, 'i' },
+    { "altsetting", 1, 0, 'a' },
+    { "alt", 1, 0, 'a' },
+    { "serial", 1, 0, 'S' },
+    { "transfer-size", 1, 0, 't' },
+    { "upload", 1, 0, 'U' },
+    { "upload-size", 1, 0, 'Z' },
+    { "download", 1, 0, 'D' },
+    { "reset", 0, 0, 'R' },
+    { "dfuse-address", 1, 0, 's' },
+    { "devnum", 1, 0, 'n' },
+    { "wait", 1, 0, 'w' },
+    { "quiet", 0, 0, 'q' },  // Add quiet option
+    { 0, 0, 0, 0 }
 };
+
+bool quiet = 0;  // Initialize quiet mode to off
 
 int dfumain(int argc, char **argv) {
     return dfumain_with_file(argc, argv, NULL);
@@ -291,7 +295,7 @@ int dfumain_with_file(int argc, char **argv, const char *filename) {
 
     while (1) {
         int c, option_index = 0;
-        c = getopt_long(argc, argv, "hVvLleE:d:p:c:i:a:S:t:U:D:Rs:Z:wn:", opts, &option_index);
+        c = getopt_long(argc, argv, "hVvLlqeE:d:p:c:i:a:S:t:U:D:Rs:Z:wn:", opts, &option_index);
         if (c == -1)
             break;
 
@@ -310,6 +314,9 @@ int dfumain_with_file(int argc, char **argv, const char *filename) {
             break;
         case 'l':
             mode = MODE_LIST;
+            break;
+        case 'q':
+            quiet = true;  // Set quiet mode
             break;
         case 'e':
             mode = MODE_DETACH;
@@ -784,7 +791,7 @@ status_again:
 				dfu_root->vendor, dfu_root->product);
 		}
 		if (dfuse_device || dfuse_options || file.bcdDFU == 0x11a) {
-			ret = dfuse_do_dnload(dfu_root, transfer_size, &file, dfuse_options);
+            ret = dfuse_do_dnload(dfu_root, transfer_size, &file, dfuse_options);
 		} else {
 			ret = dfuload_do_dnload(dfu_root, transfer_size, &file);
 	 	}

@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include "portable.h"
 #include "dfu.h"
@@ -40,6 +41,9 @@
 #include "quirks.h"
 
 #define DFU_TIMEOUT 5000
+
+#define FLAG_PAGE_ADDRESS 0x0807C000  // Address of the flag page, updated for MalletUpdate 0.1.3 to match firmware 0.1.1.13 and later
+#define TEST_PAGE_ADDRESS 0x0807B800 // address of page before flag page, which we will use to test that we can successfully erase and write to
 
 extern int verbose;
 static unsigned int last_erased_page = 1; /* non-aligned value, won't match */
@@ -52,6 +56,7 @@ static int dfuse_unprotect = 0;
 static int dfuse_mass_erase = 0;
 static int dfuse_will_reset = 0;
 static int dfuse_fast = 0;
+static int dfuse_reverse_erase = 0;
 
 static unsigned int quad2uint(unsigned char *p)
 {
@@ -119,6 +124,11 @@ static void dfuse_parse_options(const char *options)
 			options += 4;
 			continue;
 		}
+        if (!strncmp(options, "reverse-erase", endword - options)) {
+            dfuse_reverse_erase = 1;
+            options += 13;
+            continue;
+        }
 
 		/* any valid number is interpreted as upload length */
 		number = strtoul(options, &end, 0);
@@ -154,7 +164,26 @@ static int dfuse_upload(struct dfu_if *dif, const unsigned short length,
 	return status;
 }
 
-/* DFU_DNLOAD request for DfuSe 1.1a */
+
+/*
+ * The libusb_control_transfer function in libusb returns different values based on the outcome of the control transfer. Here’s a list of potential return codes:
+ * 	1.	Success:
+    •	0: On success when no data was sent or received (e.g., for a control request that does not involve any data stage).
+    •	>0: Number of bytes successfully transferred. If the transfer completes successfully and data is sent or received, this will be the number of bytes actually transferred.
+    2.	Error Codes:
+    •	LIBUSB_ERROR_TIMEOUT (-7): The transfer timed out.
+    •	LIBUSB_ERROR_PIPE (-9): The control request was not supported by the device (a STALL condition).
+    •	LIBUSB_ERROR_OVERFLOW (-8): The device sent more data than was requested.
+    •	LIBUSB_ERROR_NO_DEVICE (-4): The device has been disconnected.
+    •	LIBUSB_ERROR_BUSY (-6): The device is currently busy and cannot handle this request.
+    •	LIBUSB_ERROR_IO (-1): Input/output error occurred, often indicative of a low-level error in communication.
+    •	LIBUSB_ERROR_INVALID_PARAM (-2): An invalid parameter was passed (e.g., invalid endpoint or request).
+    •	LIBUSB_ERROR_ACCESS (-3): Insufficient permissions to access the device.
+    •	LIBUSB_ERROR_NO_MEM (-11): Memory allocation failure.
+    •	LIBUSB_ERROR_INTERRUPTED (-10): A system call was interrupted (possibly by a signal).
+
+DFU_DNLOAD request for DfuSe 1.1a
+*/
 static int dfuse_download(struct dfu_if *dif, const unsigned short length,
 		   unsigned char *data, unsigned short transaction)
 {
@@ -193,7 +222,7 @@ static int dfuse_special_command(struct dfu_if *dif, unsigned int address,
 	struct dfu_status dst;
 	int firstpoll = 1;
 	int zerotimeouts = 0;
-	int polltimeout = 0;
+    int polltimeout = 10;
 	int stalls = 0;
 
 	if (command == ERASE_PAGE) {
@@ -526,110 +555,156 @@ int dfuse_do_upload(struct dfu_if *dif, int xfer_size, int fd,
 /* Writes an element of any size to the device, taking care of page erases */
 /* returns 0 on success, otherwise -EINVAL */
 static int dfuse_dnload_element(struct dfu_if *dif, unsigned int dwElementAddress,
-			 unsigned int dwElementSize, unsigned char *data,
-			 int xfer_size)
+                                unsigned int dwElementSize, unsigned char *data,
+                                int xfer_size)
 {
-	int p;
-	int ret;
-	struct memsegment *segment;
+    int ret;
+    struct memsegment *segment;
 
-	/* Check at least that we can write to the last address */
-	segment =
-	    find_segment(dif->mem_layout, dwElementAddress + dwElementSize - 1);
-	if (!dfuse_force &&
-            (!segment || !(segment->memtype & DFUSE_WRITEABLE))) {
-		errx(EX_USAGE, "Last page at 0x%08x is not writeable",
-			dwElementAddress + dwElementSize - 1);
-	}
+    /* Check at least that we can write to the last address */
+    segment = find_segment(dif->mem_layout, dwElementAddress + dwElementSize - 1);
+    if (!dfuse_force && (!segment || !(segment->memtype & DFUSE_WRITEABLE))) {
+        errx(EX_USAGE, "Last page at 0x%08x is not writeable", dwElementAddress + dwElementSize - 1);
+    }
 
-	if (!verbose)
-		dfu_progress_bar("Erase   ", 0, 1);
+    int page_size = 2048;  // Assuming fixed page size
+    int total_pages = (dwElementSize + page_size - 1) / page_size;  // Calculate total number of pages, rounding up
 
-	/* First pass: Erase involved pages if needed */
-	for (p = 0; p < (int)dwElementSize; p += xfer_size) {
-		int page_size;
-		unsigned int erase_address;
-		unsigned int address = dwElementAddress + p;
-		int chunk_size = xfer_size;
+    if (dfuse_reverse_erase)
+    {
+        printf("\nErasing pages in reverse order...\n");
 
-		segment = find_segment(dif->mem_layout, address);
-		if (!dfuse_force &&
-		    (!segment || !(segment->memtype & DFUSE_WRITEABLE))) {
-			errx(EX_USAGE, "Page at 0x%08x is not writeable",
-				address);
-		}
-		/* If the location is not in the memory map we skip erasing */
-		/* since we wouldn't know the correct page size for flash erase */
-		if (!segment)
-			continue;
+        if (!verbose)
+        {
+            char progress_message[50];
+            snprintf(progress_message, sizeof(progress_message), "Erase page[%03d]", total_pages + 1);
+            dfu_progress_bar(progress_message, 0, dwElementSize);
+        }
 
-		page_size = segment->pagesize;
+        // Erase the flag page
+        printf("Attempting to erase FLAG PAGE...\n");
+        if ((segment->memtype & DFUSE_ERASABLE) && !dfuse_mass_erase)
+        {
+            int ret = dfuse_special_command(dif, FLAG_PAGE_ADDRESS, ERASE_PAGE);
+            if (ret >= 0)
+            {
+                printf("Successfully erased FLAG PAGE\n");
+            }
+            else
+            {
+                printf("ERROR: Unable to erase FLAG PAGE! LibUSB Error code: %d\n", ret);
+                return ret;
+            }
+        }
+        else
+        {
+            printf("ERROR: Unable to erase FLAG PAGE!\n");
+            return -2;
+        }
 
-		/* check if this is the last chunk */
-		if (p + chunk_size > (int)dwElementSize)
-			chunk_size = dwElementSize - p;
+        /* Erase pages in reverse order */
+        for (int page = total_pages - 1; page >= 0; page--) {
+            unsigned int erase_address = dwElementAddress + (page * page_size);
 
-		/* Erase only for flash memory downloads */
-		if ((segment->memtype & DFUSE_ERASABLE) && !dfuse_mass_erase) {
-			/* erase all involved pages */
-			for (erase_address = address;
-			     erase_address < address + chunk_size;
-			     erase_address += page_size)
-				if ((erase_address & ~(page_size - 1)) !=
-				    last_erased_page)
-					dfuse_special_command(dif,
-							      erase_address,
-							      ERASE_PAGE);
+            segment = find_segment(dif->mem_layout, erase_address);
+            if (!dfuse_force && (!segment || !(segment->memtype & DFUSE_WRITEABLE))) {
+                errx(EX_USAGE, "Page at 0x%08x is not writeable", erase_address);
+            }
 
-			if (((address + chunk_size - 1) & ~(page_size - 1)) !=
-			    last_erased_page) {
-				if (verbose > 1)
-					fprintf(stderr, " Chunk extends into next page,"
-					       " erase it as well\n");
-				dfuse_special_command(dif,
-						      address + chunk_size - 1,
-						      ERASE_PAGE);
-			}
-			if (!verbose)
-				dfu_progress_bar("Erase   ", p, dwElementSize);
-		}
-	}
-	if (!verbose)
-		dfu_progress_bar("Erase   ", dwElementSize, dwElementSize);
-	if (!verbose)
-		dfu_progress_bar("Download", 0, 1);
+            if (!segment)
+            {
+                char progress_message[50];
+                snprintf(progress_message, sizeof(progress_message), "Skip  page[%03d]", page + 1);
+                dfu_progress_bar(progress_message, (total_pages - page) * page_size, dwElementSize);
+                continue;
+            }
 
-	/* Second pass: Write data to (erased) pages */
-	for (p = 0; p < (int)dwElementSize; p += xfer_size) {
-		unsigned int address = dwElementAddress + p;
-		int chunk_size = xfer_size;
+            // Erase the page
+            if ((segment->memtype & DFUSE_ERASABLE) && !dfuse_mass_erase) {
+                if ((erase_address & ~(page_size - 1)) != last_erased_page) {
+                    dfuse_special_command(dif, erase_address, ERASE_PAGE);
+                }
 
-		/* check if this is the last chunk */
-		if (p + chunk_size > (int)dwElementSize)
-			chunk_size = dwElementSize - p;
+                // Display progress for each page
+                if (!verbose) {
+                    char progress_message[50];
+                    snprintf(progress_message, sizeof(progress_message), "Erase page[%03d]", page + 1);
+                    dfu_progress_bar(progress_message, (total_pages - page) * page_size, dwElementSize);
+                }
+            }
+            else
+            {
+                char progress_message[50];
+                snprintf(progress_message, sizeof(progress_message), "Skip  page[%03d]", page + 1);
+                dfu_progress_bar(progress_message, (total_pages - page) * page_size, dwElementSize);
+            }
+        }
+    } else {
+        printf("Erasing pages in standard order...\n");
 
-		if (verbose) {
-			fprintf(stderr, " Download from image offset "
-			       "%08x to memory %08x-%08x, size %i\n",
-			       p, address, address + chunk_size - 1,
-			       chunk_size);
-		} else {
-			dfu_progress_bar("Download", p, dwElementSize);
-		}
-		
-		dfuse_special_command(dif, address, SET_ADDRESS);
+        /* Erase pages in standard order */
+        for (int page = 0; page < total_pages; page++) {
+            unsigned int erase_address = dwElementAddress + (page * page_size);
 
-		/* transaction = 2 for no address offset */
-		ret = dfuse_dnload_chunk(dif, data + p, chunk_size, 2);
-		if (ret != chunk_size) {
-			errx(EX_IOERR, "Failed to write whole chunk: "
-				"%i of %i bytes", ret, chunk_size);
-			return -EINVAL;
-		}
-	}
-	if (!verbose)
-		dfu_progress_bar("Download", dwElementSize, dwElementSize);
-	return 0;
+            segment = find_segment(dif->mem_layout, erase_address);
+            if (!dfuse_force && (!segment || !(segment->memtype & DFUSE_WRITEABLE))) {
+                errx(EX_USAGE, "Page at 0x%08x is not writeable", erase_address);
+            }
+
+            if (!segment)
+                continue;
+
+            // Erase the page
+            if ((segment->memtype & DFUSE_ERASABLE) && !dfuse_mass_erase) {
+                if ((erase_address & ~(page_size - 1)) != last_erased_page) {
+                    dfuse_special_command(dif, erase_address, ERASE_PAGE);
+                }
+
+                // Display progress for each page
+                if (!verbose) {
+                    char progress_message[50];
+                    snprintf(progress_message, sizeof(progress_message), "Erase page[%03d]", page + 1);
+                    dfu_progress_bar(progress_message, page * page_size, dwElementSize);
+                }
+            }
+        }
+    }
+
+    /* Second pass: Write data to (erased) pages in standard order */
+
+    for (int page = 0; page < total_pages; page++) {
+        unsigned int address = dwElementAddress + (page * page_size);
+        int remaining_page_size = (page == total_pages - 1) ? dwElementSize - (page * page_size) : page_size;
+
+        // Break each page into chunks of xfer_size
+        for (int chunk_offset = 0; chunk_offset < remaining_page_size; chunk_offset += xfer_size) {
+            int chunk_size = (chunk_offset + xfer_size > remaining_page_size) ? remaining_page_size - chunk_offset : xfer_size;
+            unsigned int chunk_address = address + chunk_offset;
+
+            // Display page number and chunk info in the progress bar
+            if (!verbose) {
+                char progress_message[50];
+                snprintf(progress_message, sizeof(progress_message), "Download page[%03d]", page + 1);
+                dfu_progress_bar(progress_message, (page * page_size) + chunk_offset, dwElementSize);
+            } else {
+                fprintf(stderr, " Download from memory %08x-%08x, size %i\n",
+                        chunk_address, chunk_address + chunk_size - 1, chunk_size);
+            }
+
+            dfuse_special_command(dif, chunk_address, SET_ADDRESS);
+
+            ret = dfuse_dnload_chunk(dif, data + (page * page_size) + chunk_offset, chunk_size, 2);
+            if (ret != chunk_size) {
+                errx(EX_IOERR, "Failed to write whole chunk: %i of %i bytes", ret, chunk_size);
+                return -EINVAL;
+            }
+        }
+    }
+
+    if (!verbose)
+        dfu_progress_bar("Download", dwElementSize, dwElementSize);
+
+    return 0;
 }
 
 static void
@@ -647,7 +722,7 @@ dfuse_memcpy(unsigned char *dst, unsigned char **src, int *rem, int size)
 
 /* Download raw binary file to DfuSe device */
 static int dfuse_do_bin_dnload(struct dfu_if *dif, int xfer_size,
-			struct dfu_file *file, unsigned int start_address)
+            struct dfu_file *file, unsigned int start_address)
 {
 	unsigned int dwElementAddress;
 	unsigned int dwElementSize;
@@ -663,8 +738,7 @@ static int dfuse_do_bin_dnload(struct dfu_if *dif, int xfer_size,
 
 	data = file->firmware + file->size.prefix;
 
-	ret = dfuse_dnload_element(dif, dwElementAddress, dwElementSize, data,
-				   xfer_size);
+    ret = dfuse_dnload_element(dif, dwElementAddress, dwElementSize, data, xfer_size);
 	if (ret == 0)
 		printf("File downloaded successfully\n");
 
@@ -673,129 +747,139 @@ static int dfuse_do_bin_dnload(struct dfu_if *dif, int xfer_size,
 
 /* Parse a DfuSe file and download contents to device */
 static int dfuse_do_dfuse_dnload(struct dfu_if *dif, int xfer_size,
-			  struct dfu_file *file)
+                                 struct dfu_file *file)  // Added reverse erase option
 {
-	uint8_t dfuprefix[11];
-	uint8_t targetprefix[274];
-	uint8_t elementheader[8];
-	int image;
-	int element;
-	int bTargets;
-	int bAlternateSetting;
-	struct dfu_if *adif;
-	int dwNbElements;
-	unsigned int dwElementAddress;
-	unsigned int dwElementSize;
-	uint8_t *data;
-	int ret;
-	int rem;
-	int bFirstAddressSaved = 0;
+    uint8_t dfuprefix[11];
+    uint8_t targetprefix[274];
+    uint8_t elementheader[8];
+    int image;
+    int element;
+    int bTargets;
+    int bAlternateSetting;
+    struct dfu_if *adif;
+    int dwNbElements;
+    unsigned int dwElementAddress;
+    unsigned int dwElementSize;
+    uint8_t *data;
+    int ret;
+    int rem;
+    int bFirstAddressSaved = 0;
 
-	rem = file->size.total - file->size.prefix - file->size.suffix;
-	data = file->firmware + file->size.prefix;
+    rem = file->size.total - file->size.prefix - file->size.suffix;
+    data = file->firmware + file->size.prefix;
 
-        /* Must be larger than a minimal DfuSe header and suffix */
-	if (rem < (int)(sizeof(dfuprefix) +
-	    sizeof(targetprefix) + sizeof(elementheader))) {
-		errx(EX_DATAERR, "File too small for a DfuSe file");
+    // Must be larger than a minimal DfuSe header and suffix
+    if (rem < (int)(sizeof(dfuprefix) + sizeof(targetprefix) + sizeof(elementheader))) {
+        errx(EX_DATAERR, "File too small for a DfuSe file");
+    }
+
+    dfuse_memcpy(dfuprefix, &data, &rem, sizeof(dfuprefix));
+
+    if (strncmp((char *)dfuprefix, "DfuSe", 5)) {
+        errx(EX_DATAERR, "No valid DfuSe signature");
+        return -EINVAL;
+    }
+    if (dfuprefix[5] != 0x01) {
+        errx(EX_DATAERR, "DFU format revision %i not supported", dfuprefix[5]);
+        return -EINVAL;
+    }
+    bTargets = dfuprefix[10];
+    printf("File contains %i DFU images\n", bTargets);
+
+    for (image = 1; image <= bTargets; image++) {
+        printf("Parsing DFU image %i\n", image);
+        dfuse_memcpy(targetprefix, &data, &rem, sizeof(targetprefix));
+        if (strncmp((char *)targetprefix, "Target", 6)) {
+            errx(EX_DATAERR, "No valid target signature");
+            return -EINVAL;
+        }
+        bAlternateSetting = targetprefix[6];
+        if (targetprefix[7])
+            printf("Target name: %s\n", &targetprefix[11]);
+        else
+            printf("No target name\n");
+        dwNbElements = quad2uint((unsigned char *)targetprefix + 270);
+        printf("Image for alternate setting %i, (%i elements, total size = %i)\n",
+               bAlternateSetting, dwNbElements, quad2uint((unsigned char *)targetprefix + 266));
+
+        adif = dif;
+        while (adif) {
+            if (bAlternateSetting == adif->altsetting) {
+                adif->dev_handle = dif->dev_handle;
+                printf("Setting Alternate Interface #%d ...\n", adif->altsetting);
+                ret = libusb_set_interface_alt_setting(adif->dev_handle, adif->interface, adif->altsetting);
+                if (ret < 0) {
+                    errx(EX_IOERR, "Cannot set alternate interface: %s", libusb_error_name(ret));
+                }
+                break;
+            }
+            adif = adif->next;
+        }
+        if (!adif)
+            warnx("No alternate setting %d (skipping elements)", bAlternateSetting);
+
+        // Store the element addresses and sizes in an array for reverse erase
+        struct {
+            unsigned int address;
+            unsigned int size;
+        } elements[dwNbElements];
+
+        // Collect element addresses and sizes
+        for (element = 1; element <= dwNbElements; element++) {
+            printf("Parsing element %i, ", element);
+            dfuse_memcpy(elementheader, &data, &rem, sizeof(elementheader));
+            dwElementAddress = quad2uint((unsigned char *)elementheader);
+            dwElementSize = quad2uint((unsigned char *)elementheader + 4);
+            printf("address = 0x%08x, size = %i\n", dwElementAddress, dwElementSize);
+
+            if (!bFirstAddressSaved) {
+                bFirstAddressSaved = 1;
+                dfuse_address = dwElementAddress;
+            }
+
+            // Store the element details for reverse erasing
+            elements[element - 1].address = dwElementAddress;
+            elements[element - 1].size = dwElementSize;
+
+            // Advance read pointer
+            dfuse_memcpy(NULL, &data, &rem, dwElementSize);
         }
 
-	dfuse_memcpy(dfuprefix, &data, &rem, sizeof(dfuprefix));
+        // First, erase the pages in reverse order if the reverse_erase flag is true
+        if (dfuse_reverse_erase) {
+            for (element = dwNbElements - 1; element >= 0; element--) {
+                ret = dfuse_special_command(adif, elements[element].address, ERASE_PAGE);
+                if (ret != 0)
+                    return ret;
+            }
+        } else {
+            for (element = 0; element < dwNbElements; element++) {
+                ret = dfuse_special_command(adif, elements[element].address, ERASE_PAGE);
+                if (ret != 0)
+                    return ret;
+            }
+        }
 
-	if (strncmp((char *)dfuprefix, "DfuSe", 5)) {
-		errx(EX_DATAERR, "No valid DfuSe signature");
-		return -EINVAL;
-	}
-	if (dfuprefix[5] != 0x01) {
-		errx(EX_DATAERR, "DFU format revision %i not supported",
-			dfuprefix[5]);
-		return -EINVAL;
-	}
-	bTargets = dfuprefix[10];
-	printf("File contains %i DFU images\n", bTargets);
+        // Then, write the pages in the standard (forward) order
+        for (element = 0; element < dwNbElements; element++) {
+            if (adif)
+                ret = dfuse_dnload_element(adif, elements[element].address,
+                                           elements[element].size, data, xfer_size);
+            if (ret != 0)
+                return ret;
+        }
+    }
 
-	for (image = 1; image <= bTargets; image++) {
-		printf("Parsing DFU image %i\n", image);
-		dfuse_memcpy(targetprefix, &data, &rem, sizeof(targetprefix));
-		if (strncmp((char *)targetprefix, "Target", 6)) {
-			errx(EX_DATAERR, "No valid target signature");
-			return -EINVAL;
-		}
-		bAlternateSetting = targetprefix[6];
-		if (targetprefix[7])
-			printf("Target name: %s\n", &targetprefix[11]);
-		else
-			printf("No target name\n");
-		dwNbElements = quad2uint((unsigned char *)targetprefix + 270);
-		printf("Image for alternate setting %i, ", bAlternateSetting);
-		printf("(%i elements, ", dwNbElements);
-		printf("total size = %i)\n",
-		       quad2uint((unsigned char *)targetprefix + 266));
+    if (rem != 0)
+        warnx("%d bytes leftover", rem);
 
-		adif = dif;
-		while (adif) {
-			if (bAlternateSetting == adif->altsetting) {
-				adif->dev_handle = dif->dev_handle;
-				printf("Setting Alternate Interface #%d ...\n",
-				       adif->altsetting);
-				ret = libusb_set_interface_alt_setting(
-					  adif->dev_handle,
-					  adif->interface, adif->altsetting);
-				if (ret < 0) {
-					errx(EX_IOERR,
-					  "Cannot set alternate interface: %s",
-					  libusb_error_name(ret));
-				}
-				break;
-			}
-			adif = adif->next;
-		}
-		if (!adif)
-			warnx("No alternate setting %d (skipping elements)",
-			     bAlternateSetting);
+    printf("Done parsing DfuSe file\n");
 
-		for (element = 1; element <= dwNbElements; element++) {
-			printf("Parsing element %i, ", element);
-			dfuse_memcpy(elementheader, &data, &rem, sizeof(elementheader));
-			dwElementAddress =
-			    quad2uint((unsigned char *)elementheader);
-			dwElementSize =
-			    quad2uint((unsigned char *)elementheader + 4);
-			printf("address = 0x%08x, ", dwElementAddress);
-			printf("size = %i\n", dwElementSize);
-
-			if (!bFirstAddressSaved) {
-				bFirstAddressSaved = 1;
-				dfuse_address = dwElementAddress;
-			}
-			/* sanity check */
-			if ((int)dwElementSize > rem)
-				errx(EX_DATAERR, "File too small for element size");
-
-			if (adif)
-				ret = dfuse_dnload_element(adif, dwElementAddress,
-							   dwElementSize, data, xfer_size);
-			else
-				ret = 0;
-
-			/* advance read pointer */
-			dfuse_memcpy(NULL, &data, &rem, dwElementSize);
-
-			if (ret != 0)
-				return ret;
-		}
-	}
-
-	if (rem != 0)
-		warnx("%d bytes leftover", rem);
-
-	printf("Done parsing DfuSe file\n");
-
-	return 0;
+    return 0;
 }
 
 int dfuse_do_dnload(struct dfu_if *dif, int xfer_size, struct dfu_file *file,
-		    const char *dfuse_options)
+            const char *dfuse_options)
 {
 	int ret;
 	struct dfu_if *adif;
@@ -841,14 +925,50 @@ int dfuse_do_dnload(struct dfu_if *dif, int xfer_size, struct dfu_file *file,
 			errx(EX_USAGE, "This is a DfuSe file, not "
 				"meant for raw download");
 		}
-		ret = dfuse_do_bin_dnload(dif, xfer_size, file, dfuse_address);
+        ret = dfuse_do_bin_dnload(dif, xfer_size, file, dfuse_address);
+
+        // hard coded for EM Pro, this makes the dfuse library in this project non-portable!
+
+        if (ret == 0)
+        {
+            // Only write the flag if the firmware download was successful.
+            uint8_t flag_value[4] = { 0xEF, 0xBE, 0xAD, 0xDE };  // 0xDEADBEEF in little-endian
+
+            if (progressCallback) {
+                milli_sleep(2000);
+                progressCallback("Writing success flag: ", 1, 100);
+            }
+            // Call dfuse_dnload_element to write the flag value to the reserved flag page.
+            ret = dfuse_dnload_element(dif, FLAG_PAGE_ADDRESS, sizeof(flag_value), flag_value, sizeof(flag_value));
+
+            if (ret != 0) {
+                // Handle failure to write the flag
+                if (progressCallback) {
+                    milli_sleep(2000);
+                    progressCallback("FAIL Writing success flag: ", 50, 100);
+                }
+                fprintf(stderr, "Error: Failed to write flag to memory. Error code: %d\n", ret);
+                return -EINVAL;
+            } else {
+                printf("Flag written successfully after firmware update.\n");
+                if (progressCallback) {
+                    milli_sleep(2000);
+                    progressCallback("Success flag written!", 100, 100);
+                }
+            }
+        }
+        else
+        {
+            progressCallback("FAIL Writing firmware, aborting, success flag has not been written! ", 50, 100);
+            fprintf(stderr, "Error: Failed to write firmware, aborting, success flag has not been written!. Error code: %d\n", ret);
+        }
 	} else {
 		if (file->bcdDFU != 0x11a) {
 			warnx("Only DfuSe file version 1.1a is supported");
 			errx(EX_USAGE, "(for raw binary download, use the "
 			     "--dfuse-address option)");
 		}
-		ret = dfuse_do_dfuse_dnload(dif, xfer_size, file);
+        ret = dfuse_do_dfuse_dnload(dif, xfer_size, file);
 	}
 
 	adif = dif;

@@ -118,6 +118,15 @@ static int probe_prefix(struct dfu_file *file)
 	return 0;
 }
 
+
+// Global variable for the callback function
+ProgressCallback progressCallback = NULL;
+
+// Function to register the callback
+void register_progress_callback(ProgressCallback callback) {
+    progressCallback = callback;
+}
+
 void dfu_progress_bar(const char *desc, unsigned long long curr,
 		unsigned long long max)
 {
@@ -144,6 +153,11 @@ void dfu_progress_bar(const char *desc, unsigned long long curr,
 		return;
 	last_progress = progress;
 	last_time = curr_time;
+
+    // Call the registered C++ callback if it exists
+    if (progressCallback) {
+        progressCallback(desc, curr, max);
+    }
 
 	for (x = 0; x != PROGRESS_BAR_WIDTH; x++) {
 		if (x < progress)
