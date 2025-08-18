@@ -33,7 +33,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
-#include <getopt.h>
+
+#ifdef Q_OS_MAC
+    #include <getopt.h>
+#else Q_OS_WIN
+    #include <getopt_win.h>
+#endif
+
 #include <libusb.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -760,7 +766,7 @@ status_again:
         break;
 	case MODE_UPLOAD:
 		/* open for "exclusive" writing */
-		fd = open(file.name, O_WRONLY | O_BINARY | O_CREAT | O_EXCL | O_TRUNC, 0666);
+        fd = _open(file.name, O_WRONLY | O_BINARY | O_CREAT | O_EXCL | O_TRUNC, 0666);
 		if (fd < 0) {
 			warn("Cannot open file %s for writing", file.name);
 			ret = EX_CANTCREAT;
@@ -772,7 +778,7 @@ status_again:
 		} else {
 		    ret = dfuload_do_upload(dfu_root, transfer_size, expected_size, fd);
 		}
-		close(fd);
+        _close(fd);
 		if (ret < 0)
 			ret = EX_IOERR;
 		else

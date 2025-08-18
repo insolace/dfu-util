@@ -8,16 +8,18 @@
 # define PACKAGE_STRING "dfu-util 0.11-msvc"
 # define PACKAGE_BUGREPORT "http://sourceforge.net/p/dfu-util/tickets/"
 
-# ifdef _WIN32
-#  include <io.h>  // Windows-specific
-#  ifndef off_t
-#   define off_t long int
-#  endif
-# else
-#  include <unistd.h>  // For macOS and Linux
-#  include <sys/types.h>
-#  define HAVE_NANOSLEEP
-# endif
+#ifdef _WIN32
+  #include <io.h>       // Windows-specific
+  #include <sys/types.h>
+  #ifndef _OFF_T_DEFINED
+    #define _OFF_T_DEFINED
+    typedef long int off_t;
+  #endif
+#else
+  #include <unistd.h>   // For macOS and Linux
+  #include <sys/types.h>
+  #define HAVE_NANOSLEEP
+#endif
 
 #endif /* HAVE_CONFIG_H */
 

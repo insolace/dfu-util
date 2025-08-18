@@ -42,6 +42,14 @@
 #define PROGRESS_BAR_WIDTH 25
 #define STDIN_CHUNK_SIZE 65536
 
+#ifdef _WIN32
+    #include <stddef.h> // For ptrdiff_t
+    typedef ptrdiff_t ssize_t;
+    #include <limits.h>
+    #define SSIZE_MAX PTRDIFF_MAX
+
+#endif
+
 static const unsigned long crc32_table[] = {
     0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f,
     0xe963a535, 0x9e6495a3, 0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988,
@@ -191,7 +199,7 @@ uint32_t dfu_file_write_crc(int f, uint32_t crc, const void *buf, int size)
 		crc = crc32_byte(crc, ((uint8_t *)buf)[x]);
 
 	/* write data */
-	if (write(f, buf, size) != size)
+    if (_write(f, buf, size) != size)
 		err(EX_IOERR, "Could not write %d bytes to file %d", size, f);
 
 	return (crc);
@@ -226,20 +234,20 @@ void dfu_load_file(struct dfu_file *file, enum suffix_req check_suffix, enum pre
 #endif
 		file->firmware = (uint8_t*) dfu_malloc(STDIN_CHUNK_SIZE);
 		read_bytes = fread(file->firmware, 1, STDIN_CHUNK_SIZE, stdin);
-		file->size.total = read_bytes;
+        file->size.total = (long)read_bytes;
 		while (read_bytes == STDIN_CHUNK_SIZE) {
 			file->firmware = (uint8_t*) realloc(file->firmware, file->size.total + STDIN_CHUNK_SIZE);
 			if (!file->firmware)
 				err(EX_SOFTWARE, "Could not allocate firmware buffer");
 			read_bytes = fread(file->firmware + file->size.total, 1, STDIN_CHUNK_SIZE, stdin);
-			file->size.total += read_bytes;
+            file->size.total += (long)read_bytes;
 		}
 		if (verbose)
 			printf("Read %lli bytes from stdin\n", (long long) file->size.total);
 		/* Never require suffix when reading from stdin */
 		check_suffix = MAYBE_SUFFIX;
 	} else {
-		ssize_t read_count;
+        ssize_t read_count;
 		off_t read_total = 0;
 
 		f = open(file->name, O_RDONLY | O_BINARY);

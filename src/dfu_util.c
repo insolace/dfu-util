@@ -334,7 +334,7 @@ found_dfu:
 				else
 					ret = -1;
 				if (ret < 1)
-					strcpy(alt_name, "UNKNOWN");
+                    strcpy(alt_name, "UNKNOWN");
 				if (desc->iSerialNumber != 0) {
 					if (quirks & QUIRK_UTF8_SERIAL) {
 						ret = get_utf8_string_descriptor(devh, desc->iSerialNumber,
@@ -349,7 +349,7 @@ found_dfu:
 					ret = -1;
 				}
 				if (ret < 1)
-					strcpy(serial_name, "UNKNOWN");
+                    strcpy(serial_name, "UNKNOWN");
 				libusb_close(devh);
 
 				if (dfu_mode &&
@@ -379,10 +379,10 @@ found_dfu:
 				pdfu->altsetting = intf->bAlternateSetting;
 				pdfu->devnum = libusb_get_device_address(dev);
 				pdfu->busnum = libusb_get_bus_number(dev);
-				pdfu->alt_name = strdup(alt_name);
+                pdfu->alt_name = _strdup(alt_name);
 				if (pdfu->alt_name == NULL)
 					errx(EX_SOFTWARE, "Out of memory");
-				pdfu->serial_name = strdup(serial_name);
+                pdfu->serial_name = _strdup(serial_name);
 				if (pdfu->serial_name == NULL)
 					errx(EX_SOFTWARE, "Out of memory");
 				if (dfu_mode)
@@ -420,9 +420,9 @@ char *get_path(libusb_device *dev)
 	int r,j;
 	r = libusb_get_port_numbers(dev, path, sizeof(path));
 	if (r > 0) {
-		sprintf(path_buf,"%d-%d",libusb_get_bus_number(dev),path[0]);
+        sprintf(path_buf,"%d-%d",libusb_get_bus_number(dev),path[0]);
 		for (j = 1; j < r; j++){
-			sprintf(path_buf+strlen(path_buf),".%d",path[j]);
+            sprintf(path_buf+strlen(path_buf),".%d",path[j]);
 		};
 	}
 	return path_buf;
