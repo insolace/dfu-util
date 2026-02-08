@@ -42,6 +42,13 @@
 #define PROGRESS_BAR_WIDTH 25
 #define STDIN_CHUNK_SIZE 65536
 
+#ifdef _WIN32
+    #include <stddef.h>
+    typedef ptrdiff_t ssize_t;
+    #include <limits.h>
+    #define SSIZE_MAX PTRDIFF_MAX
+#endif
+
 static const unsigned long crc32_table[] = {
     0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f,
     0xe963a535, 0x9e6495a3, 0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988,
@@ -191,7 +198,11 @@ uint32_t dfu_file_write_crc(int f, uint32_t crc, const void *buf, int size)
 		crc = crc32_byte(crc, ((uint8_t *)buf)[x]);
 
 	/* write data */
+#ifdef _WIN32
+	if (_write(f, buf, size) != size)
+#else
 	if (write(f, buf, size) != size)
+#endif
 		err(EX_IOERR, "Could not write %d bytes to file %d", size, f);
 
 	return (crc);

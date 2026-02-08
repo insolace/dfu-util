@@ -379,10 +379,18 @@ found_dfu:
 				pdfu->altsetting = intf->bAlternateSetting;
 				pdfu->devnum = libusb_get_device_address(dev);
 				pdfu->busnum = libusb_get_bus_number(dev);
+#ifdef _WIN32
+				pdfu->alt_name = _strdup(alt_name);
+#else
 				pdfu->alt_name = strdup(alt_name);
+#endif
 				if (pdfu->alt_name == NULL)
 					errx(EX_SOFTWARE, "Out of memory");
+#ifdef _WIN32
+				pdfu->serial_name = _strdup(serial_name);
+#else
 				pdfu->serial_name = strdup(serial_name);
+#endif
 				if (pdfu->serial_name == NULL)
 					errx(EX_SOFTWARE, "Out of memory");
 				if (dfu_mode)

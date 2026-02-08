@@ -819,10 +819,15 @@ static int dfuse_do_dfuse_dnload(struct dfu_if *dif, int xfer_size,
             warnx("No alternate setting %d (skipping elements)", bAlternateSetting);
 
         // Store the element addresses and sizes in an array for reverse erase
-        struct {
+        struct element {
             unsigned int address;
             unsigned int size;
-        } elements[dwNbElements];
+        };
+
+        struct element *elements = malloc(dwNbElements * sizeof(*elements));
+        if (!elements) {
+            errx(EX_IOERR, "Memory allocation failed");
+        }
 
         // Collect element addresses and sizes
         for (element = 1; element <= dwNbElements; element++) {
